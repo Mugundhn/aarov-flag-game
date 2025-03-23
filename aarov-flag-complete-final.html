@@ -61,6 +61,7 @@
         <div id="gallerySection" class="hidden">
           <h2 class="section-title">📸 Upload to Google Drive</h2>
           <input type="file" accept="image/*" onchange="uploadToDrive(event)">
+          <button class="btn" onclick="listDriveImages()">🔍 Refresh Gallery</button>
           <div class="gallery" id="gallery"></div>
         </div>
       </div>
@@ -74,6 +75,7 @@
   <script>
     let user = JSON.parse(localStorage.getItem("mindplayUser"));
     let googleAccessToken = null;
+    let driveFolderId = null;
 
     function registerUser() {
       const name = document.getElementById("childName").value.trim();
@@ -101,16 +103,40 @@
     function handleGoogleLogin(response) {
       google.accounts.id.disableAutoSelect();
       googleAccessToken = response.credential;
-      alert("Google login successful! You can now upload to your Drive.");
+      createDriveFolder();
+    }
+
+    function createDriveFolder() {
+      const metadata = {
+        name: `MindPlay_${user.name}`,
+        mimeType: 'application/vnd.google-apps.folder'
+      };
+
+      fetch('https://www.googleapis.com/drive/v3/files', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + googleAccessToken,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(metadata)
+      })
+      .then(res => res.json())
+      .then(data => {
+        driveFolderId = data.id;
+        localStorage.setItem("mindplayFolderId", driveFolderId);
+        alert("Google Drive folder created!");
+      })
+      .catch(err => alert("Failed to create folder: " + err.message));
     }
 
     function uploadToDrive(event) {
       const file = event.target.files[0];
-      if (!file || !googleAccessToken) return alert("Please login with Google first.");
+      if (!file || !googleAccessToken || !driveFolderId) return alert("Google login or folder missing.");
 
       const metadata = {
         name: file.name,
-        mimeType: file.type
+        mimeType: file.type,
+        parents: [driveFolderId]
       };
 
       const form = new FormData();
@@ -124,7 +150,20 @@
       }).then(res => res.json())
         .then(val => {
           alert("Uploaded to Google Drive!");
+          listDriveImages();
         }).catch(err => alert("Upload failed: " + err.message));
+    }
+
+    function listDriveImages() {
+      if (!googleAccessToken || !driveFolderId) return alert("Please login with Google.");
+      fetch(`https://www.googleapis.com/drive/v3/files?q='${driveFolderId}'+in+parents+and+mimeType+contains+'image/'&fields=files(id,name,thumbnailLink,webViewLink)&key=AIzaSyDZNVN90eteq072MNVF7tZoozx_bj16wfY`, {
+        headers: { 'Authorization': 'Bearer ' + googleAccessToken }
+      })
+      .then(res => res.json())
+      .then(data => {
+        const container = document.getElementById("gallery");
+        container.innerHTML = data.files.map(file => `<a href="${file.webViewLink}" target="_blank"><img src="https://drive.google.com/thumbnail?id=${file.id}" alt="${file.name}"></a>`).join("");
+      });
     }
 
     function init() {
@@ -132,6 +171,7 @@
         document.getElementById("registerSection").classList.add("hidden");
         document.getElementById("mainContent").classList.remove("hidden");
         document.getElementById("welcomeText").textContent = `Welcome, ${user.name}! Track your progress below.`;
+        driveFolderId = localStorage.getItem("mindplayFolderId") || null;
       }
     }
 
